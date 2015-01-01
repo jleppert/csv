@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8' />
+    <title></title>
+</head>
+<body>
+  <script>
+var socket = new WebSocket('ws://localhost:8082');
+socket.onopen = function() {
+  console.log('Socket opened!');
+  socket.send('hello');
+};
+
+socket.onclose = function() {
+  console.log('Socket closed!');
+};
+
+socket.onmessage = function(evt) {
+  console.log('got message!', evt);
+};
+  </script>
+</body>
+</html>

@@ -10,6 +10,19 @@
   "author": "Johnathan Leppert",
   "license": "BSD",
   "dependencies": {
-    "pg": "^4.4.3"
+    "compression": "^1.6.0",
+    "express": "^4.13.3",
+    "gdal": "^0.7.2",
+    "hiredis": "^0.4.1",
+    "pg": "^4.4.3",
+    "pg-native": "^1.9.0",
+    "pg-query-readstream": "^1.0.0",
+    "pg-query-stream": "^0.7.0",
+    "redis": "^2.2.3",
+    "redis-stream": "^0.1.0",
+    "websocket-stream": "^2.0.2",
+    "websocketstream": "^2.0.2",
+    "ws": "git+https://github.com/jleppert/ws.git",
+    "xxhash": "^0.2.3"
   }
 }

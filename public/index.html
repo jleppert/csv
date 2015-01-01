@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8' />
+    <title></title>
+    <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+    <script src='deps.js'></script>
+    <link href='map.css' rel='stylesheet' />
+    <style>
+        body { margin:0; padding:0; }
+        #map { position:absolute; z-index: 10; top:0; bottom:0; width:100%; }
+        #controls { position: fixed; z-index: 11; left: 0px; top: 0px; padding: 10px; background-color: rgba(255, 255, 255, 0.8); }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+  <select id="customers">
+    <option value="" default selected>All Customers</option>
+  </select>
+  <select id="sites">
+    <option value="" default selected>All Sites</option>
+  </select>
+  <select id="images">
+    <option value="" default selected>All Images</option>
+  </select>
+</div>
+<div id='map'></div>
+
+<script>
+mapboxgl.accessToken = 'pk.eyJ1IjoiamxlcHBlcnQiLCJhIjoicnNTY0UwQSJ9.RuTrPZfnMm04ti7_om4dmw';
+var map = new mapboxgl.Map({
+    container: 'map',
+    style: {
+      version: 8,
+      sources: {
+        kespry: {
+          scheme: 'tms',
+          minzoom: 18,
+          maxzoom: 22,
+          tilejson: '2.0.0',
+          autoscale: true,
+          type: 'raster',
+          tiles: [
+            'http://localhost:8081/tilesets/2127-ortho-2a83b78afa8c1d786b41bc5528a6c6ca/{z}/{x}/{y}.png'
+          ],
+          tileSize: 256
+        },
+        mapbox: {
+          type: 'raster',
+          url: 'mapbox://mapbox.satellite',
+          tileSize: 256
+        }
+      },
+      layers: [{
+        id: 'satellite',
+        type: 'raster',
+        source: 'mapbox',
+        'source-layer': 'mapbox_satellite_full'
+      },
+      {
+        id: 'kespry',
+        type: 'raster',
+        source: 'kespry',
+        minzoom: 18,
+        maxzoom: 22,
+        scheme: 'tms'
+      },
+      {
+        id: 'markers',
+        type: 'symbol',
+        source: 'markers',
+        layout: {
+          'icon-image': '{marker-symbol}-15',
+          'text-field': '{title}',
+          'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+          'text-offset': [0, 0.6],
+          'text-anchor': 'top'
+        },
+        paint: {
+          'text-size': 12
+        }
+      }],
+    },
+    center: [-122.149598547113, 37.474249779898],
+    zoom: 18
+});
+map.addControl(new mapboxgl.Navigation());
+var resources = { sites: [], images: [], customers: [] };
+var resourcesLkup = {};
+
+function addOptions(options, key, value, el, sort, filter) {
+  var frag = document.createDocumentFragment();
+  if(sort) options = options.sort(sort);
+   
+  options.forEach(function(option) {
+    var optionEl = document.createElement('option');
+    optionEl.setAttribute('value', option[key]);
+    optionEl.textContent = filter ? filter(option) : option[value];
+    frag.appendChild(optionEl);
+  });
+
+  var $el = document.getElementById(el);
+  var defaultNode = undefined;
+  while($el.hasChildNodes()) {
+    if($el.lastChild.hasAttribute && $el.lastChild.hasAttribute('default')) {
+      defaultNode = $el.lastChild;
+    }
+    $el.removeChild($el.lastChild);
+  }
+  if(defaultNode) frag.insertBefore(defaultNode, frag.firstChild);
+  
+  $el.appendChild(frag);
+}
+
+function createHash(array, key) {
+  var h = {};
+  array.forEach(function(item) {
+    h[item[key]] = item;
+  });
+
+  return h;
+}
+
+function getPath(key) {
+  if(!key) return undefined;
+  var parts = key.split('.'),
+      obj   = window[parts.shift()];
+
+  var part = undefined;
+  while(part = parts.shift()) {
+    obj = obj[part];
+  }
+  
+  return obj;
+}
+
+var sort = {
+  date: {
+    desc: function(sortKey) {
+      return function(a, b) {
+        return Date.parse(b[sortKey]) - Date.parse(a[sortKey]);
+      }
+    }
+  },
+  alpha: {
+    desc: function(sortKey) {
+      return function(a, b) {
+        return a[sortKey].localeCompare(b[sortKey]);
+      }
+    }
+  }
+};
+
+var filter = {
+  imageLocaltime: function(item) {
+    var formatted = undefined;
+    try {
+      formatted = new Date(item.captured_at).toLocaleString('en-US', { timeZone: resourcesLkup.sites[item.site_id].time_zone || 'America/Los_Angeles' });
+    } catch(e) {
+      formatted = new Date(item.captured_at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }) + '*';
+    }
+
+    return formatted;
+  }
+};
+
+function options(config) {
+  var sort = config.sort && config.sortKey ? getPath(config.sort)(config.sortKey) : undefined;
+  var valueLkup = resourcesLkup[config.el] = createHash(getPath(config.data), config.key);
+  addOptions(getPath(config.data), config.key, config.value, config.el, sort, getPath(config.filter));
+  
+  return {
+    options: function(childConfig, cb) {
+      var self = this,
+          el   = document.getElementById(config.el);
+
+      function update() {
+        var optionsEl = document.getElementById(childConfig.el);
+       
+        var filterCb = function(parent, data) { return data; };
+        if(childConfig.parentKey) {
+          filterCb = function(parent, data) {
+            if(Array.isArray(parent)) {
+              return data.filter(function(item) { return !!(parent.indexOf(item[childConfig.parentKey]) != -1); });
+            } else {
+              return data.filter(function(item) { return !!(item[childConfig.parentKey] === parent[config.key]) });
+            }
+          };
+        }
+        
+        var selection = undefined;
+        if(el.selectedIndex != -1 && el.selectedIndex > 0) {
+          selection = valueLkup[el.options[el.selectedIndex].value]
+        } else if(el.selectedIndex === 0) { 
+          selection = Array.prototype.map.call(el.options, function(item) {
+            return parseInt(item.getAttribute('value')) || undefined;
+          });
+        } else {
+          selection = {};
+        }
+        
+        var sort = childConfig.sort && childConfig.sortKey ? getPath(childConfig.sort)(childConfig.sortKey) : undefined;
+        var filteredData = filterCb(selection, getPath(childConfig.data));
+        addOptions(filteredData, childConfig.key, childConfig.value, childConfig.el, sort, getPath(config.filter));
+        cb(filteredData);
+        
+          var node = self,
+              child = undefined;
+         while(child = node.child) {
+           if(child.update) child.update();
+           node = child;
+         }
+      }
+      el.addEventListener('change', update);
+      this.update = update;
+     
+      this.child = options(childConfig); 
+      return this.child;
+    }
+  };
+}
+
+
+function defer() {
+  var resolve, reject;
+
+  var promise = new Promise(function() {
+    resolve = arguments[0];
+    reject  = arguments[1];
+  });
+
+  return {
+    resolve: resolve,
+    reject: reject,
+    promise: promise
+  };
+}
+
+var events = {
+  customers: defer(),
+  sites: defer(),
+  images: defer()
+};
+
+Promise.all(Object.keys(events).map(function(event) {
+  return events[event].promise;
+})).then(function() {
+  options({ data: 'resources.customers', key: 'id', value: 'name', el: 'customers', sort: 'sort.alpha.desc', sortKey: 'name' })
+    .options({ data: 'resources.sites', key: 'id', parentKey: 'customer_id', value: 'name', el: 'sites', sort: 'sort.alpha.desc', sortKey: 'name' }, function(sites) {
+        // create geojson markers for each site, find bounding box and zoom to it
+        var lats = sites.map(function(site) { return site.center_lat }),
+            lngs = sites.map(function(site) { return site.center_lng });
+
+        map.fitBounds([[Math.min.apply(Math, lngs), Math.min.apply(Math, lats)], [Math.max.apply(Math, lngs), Math.max.apply(Math, lats)]]);
+        
+        map.removeSource('sites');
+        map.addSource('sites', {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: sites.map(function(site) {
+              return {
+                type: 'Feature',
+                  geometry: {
+                    type: 'Point',
+                    coordinates: [site.center_lng, site.center_lat]
+                  },
+                  properties: {
+                    title: site.name,
+                    'marker-symbol': 'marker'
+                  }
+              };
+            })
+          }
+        });
+        console.log('sites!!', data);
+      }).options({ data: 'resources.images', key: 'id', parentKey: 'site_id',  value: 'captured_at', filter: 'filter.imageLocaltime', el: 'images', sort: 'sort.date.desc', sortKey: 'captured_at' }, function(images) {
+          // create geojson outlines for each image and add to map layer
+          console.log('images!!', data);
+        });
+});
+
+var startPort = 8082,
+    sortedResources = Object.keys(resources).sort();
+
+var sockets = Array.apply(null, Array(Object.keys(resources).length)).map(function() { return new WebSocket('ws://localhost:' + startPort++); }).forEach(function(socket, index) {
+  socket.onopen = function() {
+    console.log('Socket opened!');
+    socket.send(JSON.stringify({ resource: sortedResources[index] }));
+  };
+
+  socket.onclose = function() {
+    console.log('Socket closed!');
+  };
+
+  socket.onmessage = function(evt) {
+    resources[sortedResources[index]] = JSON.parse(evt.data);
+    events[sortedResources[index]].resolve();
+  };
+});
+</script>
+</div>
+</body>
+</html>
+
